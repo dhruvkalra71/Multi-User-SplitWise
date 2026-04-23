@@ -6,8 +6,12 @@ from settlement import minimize_cash_flow
 
 HOST = "0.0.0.0"
 PORT = 5000
-DATA_FILE = "data.json"
 
+# ------------------ File Path ------------------ #
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.join(BASE_DIR, "data.json")
+
+# ------------------ Users ------------------ #
 # Hardcoded users
 USERS = {
     "dhruv": "1234",
@@ -16,9 +20,7 @@ USERS = {
     "yashi": "23103038"
 }
 
-# Active connections {username: conn}
 active_clients = {}
-
 lock = threading.Lock()
 
 
@@ -26,30 +28,36 @@ lock = threading.Lock()
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {"groups": {}}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"groups": {}}
 
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    try:
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print("[SAVE ERROR]:", e)
 
 
 data_store = load_data()
 
 
-# ------------------ Utility ------------------ #
+# ------------------ Communication ------------------ #
 def send(conn, msg):
-    conn.sendall((json.dumps(msg) + "\n").encode())
+    try:
+        conn.sendall((json.dumps(msg) + "\n").encode())
+    except:
+        pass
 
 
 def broadcast(group, message):
     for user in group["members"]:
         if user in active_clients:
-            try:
-                send(active_clients[user], message)
-            except:
-                pass
+            send(active_clients[user], message)
 
 
 # ------------------ Core Logic ------------------ #
@@ -61,6 +69,7 @@ def handle_login(conn, req):
     if username in USERS and USERS[username] == password:
         active_clients[username] = conn
         return {"status": "ok", "message": "Login successful"}
+
     return {"status": "error", "message": "Invalid credentials"}
 
 
@@ -69,15 +78,16 @@ def handle_create_group(req, user):
 
     with lock:
         if group_name in data_store["groups"]:
-            return {"status": "error", "message": "Group exists"}
+            return {"status": "error", "message": "Group already exists"}
 
         data_store["groups"][group_name] = {
             "members": [user],
             "transactions": []
         }
+
         save_data(data_store)
 
-    return {"status": "ok", "message": "Group created"}
+    return {"status": "ok", "message": "Group created successfully"}
 
 
 def handle_join_group(req, user):
@@ -104,9 +114,19 @@ def handle_list_groups(user):
 
 
 def handle_add_transaction(req, user):
-    group = req["data"]["group"]
+    group_name = req["data"]["group"]
     amount = req["data"]["amount"]
     split_between = req["data"]["split_between"]
+
+    if group_name not in data_store["groups"]:
+        return {"status": "error", "message": "Group not found"}
+
+    group = data_store["groups"][group_name]
+
+    # Validate users
+    for u in split_between:
+        if u not in group["members"]:
+            return {"status": "error", "message": f"{u} not in group"}
 
     txn = {
         "payer": user,
@@ -115,72 +135,113 @@ def handle_add_transaction(req, user):
     }
 
     with lock:
-        data_store["groups"][group]["transactions"].append(txn)
+        group["transactions"].append(txn)
         save_data(data_store)
 
-    broadcast(data_store["groups"][group], {
+    broadcast(group, {
         "type": "notification",
-        "message": f"{user} added a transaction"
+        "message": f"{user} added ₹{amount} expense"
     })
 
     return {"status": "ok", "message": "Transaction added"}
 
 
 def handle_view_transactions(req):
-    group = req["data"]["group"]
-    txns = data_store["groups"][group]["transactions"]
-    return {"status": "ok", "transactions": txns}
+    group_name = req["data"]["group"]
+
+    if group_name not in data_store["groups"]:
+        return {"status": "error", "message": "Group not found"}
+
+    return {
+        "status": "ok",
+        "transactions": data_store["groups"][group_name]["transactions"]
+    }
 
 
 def handle_delete_transaction(req):
-    group = req["data"]["group"]
+    group_name = req["data"]["group"]
     index = req["data"]["index"]
+
+    if group_name not in data_store["groups"]:
+        return {"status": "error", "message": "Group not found"}
 
     with lock:
         try:
-            data_store["groups"][group]["transactions"].pop(index)
+            data_store["groups"][group_name]["transactions"].pop(index)
             save_data(data_store)
-            return {"status": "ok", "message": "Deleted"}
+            return {"status": "ok", "message": "Transaction deleted"}
         except:
             return {"status": "error", "message": "Invalid index"}
 
 
-def compute_balances(group):
-    balances = {}
+# ------------------ Balance Logic ------------------ #
 
-    for member in group["members"]:
-        balances[member] = 0
+def compute_balances(group):
+    balances = {member: 0 for member in group["members"]}
 
     for txn in group["transactions"]:
-        payer = txn["payer"]
-        amount = txn["amount"]
-        split = txn["split_between"]
+        payer = txn.get("payer")
+        amount = txn.get("amount", 0)
+        split = txn.get("split_between", [])
 
-        share = amount / (len(split) + 1)
+        if payer not in balances:
+            continue
+
+        try:
+            share = amount / (len(split) + 1)
+        except:
+            continue
 
         balances[payer] += amount - share
 
         for user in split:
-            balances[user] -= share
+            if user in balances:
+                balances[user] -= share
 
     return balances
 
 
-def handle_settle(req):
+def handle_view_balances(req):
     group_name = req["data"]["group"]
+
+    if group_name not in data_store["groups"]:
+        return {"status": "error", "message": "Group not found"}
+
     group = data_store["groups"][group_name]
-
     balances = compute_balances(group)
-    settlements = minimize_cash_flow(balances)
 
-    message = {
-        "type": "settlement",
-        "data": settlements
-    }
+    balances = {k: round(v, 2) for k, v in balances.items()}
 
-    broadcast(group, message)
+    return {"status": "ok", "balances": balances}
 
-    return {"status": "ok", "settlements": settlements}
+
+# ------------------ Settlement ------------------ #
+
+def handle_settle(req):
+    try:
+        group_name = req["data"]["group"]
+
+        if group_name not in data_store["groups"]:
+            return {"status": "error", "message": "Group not found"}
+
+        group = data_store["groups"][group_name]
+
+        if not group["transactions"]:
+            return {"status": "ok", "settlements": []}
+
+        balances = compute_balances(group)
+        settlements = minimize_cash_flow(balances)
+
+        broadcast(group, {
+            "type": "settlement",
+            "data": settlements
+        })
+
+        return {"status": "ok", "settlements": settlements}
+
+    except Exception as e:
+        print("[SETTLE ERROR]:", e)
+        return {"status": "error", "message": "Settlement failed"}
 
 
 # ------------------ Client Handler ------------------ #
@@ -188,6 +249,7 @@ def handle_settle(req):
 def handle_client(conn, addr):
     print(f"[CONNECTED] {addr}")
     user = None
+    buffer = ""
 
     try:
         while True:
@@ -195,39 +257,51 @@ def handle_client(conn, addr):
             if not data:
                 break
 
-            req = json.loads(data.decode())
-            action = req.get("action")
+            buffer += data.decode()
 
-            if action == "login":
-                res = handle_login(conn, req)
-                if res["status"] == "ok":
-                    user = req["data"]["username"]
+            while "\n" in buffer:
+                msg, buffer = buffer.split("\n", 1)
 
-            elif action == "create_group":
-                res = handle_create_group(req, user)
+                try:
+                    req = json.loads(msg)
+                except:
+                    continue
 
-            elif action == "join_group":
-                res = handle_join_group(req, user)
+                action = req.get("action")
 
-            elif action == "list_groups":
-                res = handle_list_groups(user)
+                if action == "login":
+                    res = handle_login(conn, req)
+                    if res["status"] == "ok":
+                        user = req["data"]["username"]
 
-            elif action == "add_transaction":
-                res = handle_add_transaction(req, user)
+                elif action == "create_group":
+                    res = handle_create_group(req, user)
 
-            elif action == "view_transactions":
-                res = handle_view_transactions(req)
+                elif action == "join_group":
+                    res = handle_join_group(req, user)
 
-            elif action == "delete_transaction":
-                res = handle_delete_transaction(req)
+                elif action == "list_groups":
+                    res = handle_list_groups(user)
 
-            elif action == "settle":
-                res = handle_settle(req)
+                elif action == "add_transaction":
+                    res = handle_add_transaction(req, user)
 
-            else:
-                res = {"status": "error", "message": "Unknown action"}
+                elif action == "view_transactions":
+                    res = handle_view_transactions(req)
 
-            send(conn, res)
+                elif action == "delete_transaction":
+                    res = handle_delete_transaction(req)
+
+                elif action == "view_balances":
+                    res = handle_view_balances(req)
+
+                elif action == "settle":
+                    res = handle_settle(req)
+
+                else:
+                    res = {"status": "error", "message": "Unknown action"}
+
+                send(conn, res)
 
     except Exception as e:
         print("[ERROR]", e)
@@ -235,6 +309,7 @@ def handle_client(conn, addr):
     finally:
         if user in active_clients:
             del active_clients[user]
+
         conn.close()
         print(f"[DISCONNECTED] {addr}")
 

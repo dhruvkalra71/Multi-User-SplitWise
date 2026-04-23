@@ -1,53 +1,100 @@
 import socket
 import threading
 import json
+from queue import Queue
 
-HOST = "127.0.0.1"   # change if server is remote
+HOST = "127.0.0.1"
 PORT = 5000
 
+response_queue = Queue()
 
-# ------------------ Utility ------------------ #
+
+# ------------------ Send ------------------ #
 def send(sock, msg):
     sock.sendall((json.dumps(msg) + "\n").encode())
 
 
-def receive(sock):
-    data = sock.recv(4096)
-    if not data:
-        return None
-    return json.loads(data.decode())
-
-
-# ------------------ Listener Thread ------------------ #
+# ------------------ Listener ------------------ #
 def listen_server(sock):
+    buffer = ""
+
     while True:
         try:
             data = sock.recv(4096)
             if not data:
                 break
 
-            messages = data.decode().strip().split("\n")
-            for msg in messages:
+            buffer += data.decode()
+
+            while "\n" in buffer:
+                msg, buffer = buffer.split("\n", 1)
                 res = json.loads(msg)
 
-                # Notifications / async messages
+                # Notifications
                 if res.get("type") == "notification":
-                    print(f"\n{res['message']}")
+                    print(f"\n🔔 {res['message']}")
+
                 elif res.get("type") == "settlement":
-                    print("\nSettlement Suggestions:")
+                    print("\n💸 Settlement Suggestions:")
                     for s in res["data"]:
                         print(f"{s['from']} → {s['to']} : ₹{s['amount']}")
+
                 else:
-                    print(f"\n[SERVER]: {res}")
+                    response_queue.put(res)
 
         except:
             break
 
 
-# ------------------ CLI Logic ------------------ #
+# ------------------ Receive ------------------ #
+def receive():
+    return response_queue.get()
 
+
+# ------------------ Pretty Print ------------------ #
+def print_response(res):
+    if not res:
+        print("⚠️ No response")
+        return
+
+    if res.get("status") == "ok":
+        if "message" in res:
+            print(f"✅ {res['message']}")
+        elif "groups" in res:
+            print("\n📂 Your Groups:")
+            if res["groups"]:
+                for g in res["groups"]:
+                    print(f"- {g}")
+            else:
+                print("No groups found")
+    else:
+        print(f"❌ {res.get('message', 'Error')}")
+
+
+# ------------------ Balance Display ------------------ #
+def print_balances(balances):
+    print("\n📊 Balances:")
+
+    empty = True
+    for user, amount in balances.items():
+        if abs(amount) < 1e-6:
+            continue
+
+        empty = False
+
+        if amount > 0:
+            print(f"{user} gets ₹{amount}")
+        else:
+            print(f"{user} owes ₹{abs(amount)}")
+
+    if empty:
+        print("All settled ✅")
+
+
+# ------------------ Login ------------------ #
 def login(sock):
     while True:
+        print("\n--- LOGIN ---")
         username = input("Username: ")
         password = input("Password: ")
 
@@ -56,59 +103,99 @@ def login(sock):
             "data": {"username": username, "password": password}
         })
 
-        res = receive(sock)
-        if res and res["status"] == "ok":
-            print("Login successful")
+        res = receive()
+
+        if res and res.get("status") == "ok":
+            print("✅ Login successful")
             return username
         else:
-            print("Invalid credentials")
+            print("❌ Invalid credentials")
 
 
-def main_menu(sock):
+# ------------------ Main Menu ------------------ #
+def main_menu(sock, user):
     while True:
         print("\n--- MAIN MENU ---")
         print("1. View Groups")
         print("2. Create Group")
         print("3. Join Group")
-        print("4. Logout")
+        print("0. Logout")
 
         choice = input("Enter choice: ")
 
         if choice == "1":
             send(sock, {"action": "list_groups"})
-            res = receive(sock)
-            print("Your Groups:", res.get("groups", []))
+            print_response(receive())
 
         elif choice == "2":
-            name = input("Group name: ")
-            send(sock, {"action": "create_group", "data": {"group": name}})
-            print(receive(sock))
+            name = input("Enter group name (or 0 to cancel): ")
+            if name == "0":
+                continue
+
+            send(sock, {
+                "action": "create_group",
+                "data": {"group": name}
+            })
+            print_response(receive())
 
         elif choice == "3":
-            name = input("Enter group name: ")
-            send(sock, {"action": "join_group", "data": {"group": name}})
-            print(receive(sock))
-            group_menu(sock, name)
+            name = input("Enter group name (or 0 to cancel): ")
+            if name == "0":
+                continue
 
-        elif choice == "4":
-            print("Logging out...")
+            send(sock, {
+                "action": "join_group",
+                "data": {"group": name}
+            })
+
+            res = receive()
+            print_response(res)
+
+            if res and res.get("status") == "ok":
+                group_menu(sock, user, name)
+
+        elif choice == "0":
+            print("👋 Logged out")
             break
 
+        else:
+            print("Invalid choice")
 
-def group_menu(sock, group):
+
+# ------------------ Group Menu ------------------ #
+def group_menu(sock, user, group):
     while True:
         print(f"\n--- GROUP: {group} ---")
         print("1. Add Transaction")
         print("2. View Transactions")
         print("3. Delete Transaction")
-        print("4. Settle Transactions")
-        print("5. Exit Group")
+        print("4. View Balances")   # 🔥 NEW
+        print("5. Settle Transactions")
+        print("0. Back")
 
         choice = input("Enter choice: ")
 
+        # ---------------- ADD ---------------- #
         if choice == "1":
-            amount = float(input("Amount: "))
-            users = input("Split between (comma separated): ").split(",")
+            amt = input("Amount (or 0 to cancel): ")
+            if amt == "0":
+                continue
+
+            try:
+                amount = float(amt)
+            except:
+                print("❌ Invalid amount")
+                continue
+
+            users = input("Split between (excluding yourself): ")
+            if users == "0":
+                continue
+
+            users = [u.strip() for u in users.split(",") if u.strip()]
+
+            # Remove payer if entered
+            if user in users:
+                users.remove(user)
 
             send(sock, {
                 "action": "add_transaction",
@@ -118,54 +205,96 @@ def group_menu(sock, group):
                     "split_between": users
                 }
             })
-            print(receive(sock))
 
+            print_response(receive())
+
+        # ---------------- VIEW TXN ---------------- #
         elif choice == "2":
             send(sock, {
                 "action": "view_transactions",
                 "data": {"group": group}
             })
-            res = receive(sock)
 
-            print("\nTransactions:")
-            for i, txn in enumerate(res.get("transactions", [])):
-                print(f"{i}: {txn}")
+            res = receive()
 
+            print("\n📜 Transactions:")
+            if res and res.get("transactions"):
+                for i, txn in enumerate(res["transactions"]):
+                    payer = txn["payer"]
+                    amt = txn["amount"]
+                    people = txn["split_between"]
+
+                    print(f"{i}: {payer} paid ₹{amt} for {', '.join(people)}")
+            else:
+                print("No transactions found")
+
+        # ---------------- DELETE ---------------- #
         elif choice == "3":
-            idx = int(input("Enter transaction index: "))
-            send(sock, {
-                "action": "delete_transaction",
-                "data": {"group": group, "index": idx}
-            })
-            print(receive(sock))
+            idx = input("Enter index (or 0 to cancel): ")
+            if idx == "0":
+                continue
 
+            try:
+                send(sock, {
+                    "action": "delete_transaction",
+                    "data": {"group": group, "index": int(idx)}
+                })
+                print_response(receive())
+            except:
+                print("❌ Invalid index")
+
+        # ---------------- VIEW BALANCES ---------------- #
         elif choice == "4":
+            send(sock, {
+                "action": "view_balances",
+                "data": {"group": group}
+            })
+
+            res = receive()
+
+            if res and "balances" in res:
+                print_balances(res["balances"])
+            else:
+                print("❌ Could not fetch balances")
+
+        # ---------------- SETTLE ---------------- #
+        elif choice == "5":
             send(sock, {
                 "action": "settle",
                 "data": {"group": group}
             })
-            print(receive(sock))
 
-        elif choice == "5":
+            res = receive()
+
+            print("\n💸 Settlement Result:")
+            if res and res.get("settlements"):
+                for s in res["settlements"]:
+                    print(f"{s['from']} → {s['to']} : ₹{s['amount']}")
+            else:
+                print("Nothing to settle")
+
+        elif choice == "0":
             break
 
+        else:
+            print("Invalid choice")
 
-# ------------------ Main ------------------ #
 
+# ------------------ Start ------------------ #
 def start_client():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((HOST, PORT))
 
-    # Start listener thread
+    print("✅ Connected to server")
+
     thread = threading.Thread(target=listen_server, args=(sock,), daemon=True)
     thread.start()
 
-    print("Connected to server")
-
     user = login(sock)
-    main_menu(sock)
+    main_menu(sock, user)
 
     sock.close()
+    print("Disconnected")
 
 
 if __name__ == "__main__":

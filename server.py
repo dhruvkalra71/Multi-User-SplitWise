@@ -5,7 +5,7 @@ import os
 from settlement import minimize_cash_flow
 
 HOST = "0.0.0.0"
-PORT = 5000
+PORT = 5005
 
 # ------------------ File Path ------------------ #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +75,7 @@ def handle_login(conn, req):
 
 def handle_create_group(req, user):
     group_name = req["data"]["group"]
+    password = req["data"].get("password", "")
 
     with lock:
         if group_name in data_store["groups"]:
@@ -82,7 +83,8 @@ def handle_create_group(req, user):
 
         data_store["groups"][group_name] = {
             "members": [user],
-            "transactions": []
+            "transactions": [],
+            "password": password
         }
 
         save_data(data_store)
@@ -92,13 +94,20 @@ def handle_create_group(req, user):
 
 def handle_join_group(req, user):
     group_name = req["data"]["group"]
+    password = req["data"].get("password", "")
 
     with lock:
         if group_name not in data_store["groups"]:
             return {"status": "error", "message": "Group not found"}
 
-        if user not in data_store["groups"][group_name]["members"]:
-            data_store["groups"][group_name]["members"].append(user)
+        group = data_store["groups"][group_name]
+        stored_password = group.get("password", "")
+
+        if stored_password and stored_password != password:
+            return {"status": "error", "message": "Invalid group password"}
+
+        if user not in group["members"]:
+            group["members"].append(user)
 
         save_data(data_store)
 
@@ -113,28 +122,51 @@ def handle_list_groups(user):
     return {"status": "ok", "groups": groups}
 
 
-def handle_add_transaction(req, user):
+def handle_get_group_members(req, user):
     group_name = req["data"]["group"]
-    amount = req["data"]["amount"]
-    split_between = req["data"]["split_between"]
 
     if group_name not in data_store["groups"]:
         return {"status": "error", "message": "Group not found"}
 
     group = data_store["groups"][group_name]
+    members = group.get("members", [])
 
-    # Validate users
+    if user not in members:
+        return {"status": "error", "message": "Not a member of this group"}
+
+    return {"status": "ok", "members": members}
+
+
+def handle_add_transaction(req, user):
+    group_name = req["data"]["group"]
+    amount = req["data"]["amount"]
+    split_between = req["data"]["split_between"]
+    include_payer = req["data"].get("include_payer", False)
+
+    if group_name not in data_store["groups"]:
+        return {"status": "error", "message": "Group not found"}
+
+    group = data_store["groups"][group_name]
+    members = group.get("members", [])
+
+    all_people = split_between[:]
+    if include_payer:
+        all_people.append(user)
+
     for u in split_between:
-        if u not in group["members"]:
+        if u not in members:
             return {"status": "error", "message": f"{u} not in group"}
 
     txn = {
         "payer": user,
         "amount": amount,
-        "split_between": split_between
+        "split_between": split_between,
+        "include_payer": include_payer
     }
 
     with lock:
+        if "transactions" not in group:
+            group["transactions"] = []
         group["transactions"].append(txn)
         save_data(data_store)
 
@@ -154,7 +186,7 @@ def handle_view_transactions(req):
 
     return {
         "status": "ok",
-        "transactions": data_store["groups"][group_name]["transactions"]
+        "transactions": data_store["groups"][group_name].get("transactions", [])
     }
 
 
@@ -165,9 +197,13 @@ def handle_delete_transaction(req):
     if group_name not in data_store["groups"]:
         return {"status": "error", "message": "Group not found"}
 
+    group = data_store["groups"][group_name]
+    transactions = group.get("transactions", [])
+
     with lock:
         try:
-            data_store["groups"][group_name]["transactions"].pop(index)
+            transactions.pop(index)
+            group["transactions"] = transactions
             save_data(data_store)
             return {"status": "ok", "message": "Transaction deleted"}
         except:
@@ -177,22 +213,28 @@ def handle_delete_transaction(req):
 # ------------------ Balance Logic ------------------ #
 
 def compute_balances(group):
-    balances = {member: 0 for member in group["members"]}
+    members = group.get("members", [])
+    transactions = group.get("transactions", [])
+    balances = {member: 0 for member in members}
 
-    for txn in group["transactions"]:
+    for txn in transactions:
         payer = txn.get("payer")
         amount = txn.get("amount", 0)
         split = txn.get("split_between", [])
+        include_payer = txn.get("include_payer", False)
 
         if payer not in balances:
             continue
 
-        try:
-            share = amount / (len(split) + 1)
-        except:
+        if not split:
             continue
 
-        balances[payer] += amount - share
+        if include_payer:
+            share = amount / (len(split) + 1)
+            balances[payer] += amount - share
+        else:
+            balances[payer] += amount
+            share = amount / len(split)
 
         for user in split:
             if user in balances:
@@ -225,12 +267,35 @@ def handle_settle(req):
             return {"status": "error", "message": "Group not found"}
 
         group = data_store["groups"][group_name]
+        members = group.get("members", [])
+        transactions_list = group.get("transactions", [])
 
-        if not group["transactions"]:
+        if not transactions_list:
             return {"status": "ok", "settlements": []}
 
-        balances = compute_balances(group)
-        settlements = minimize_cash_flow(balances)
+        participants = members
+        transactions = []
+        for txn in transactions_list:
+            payer = txn.get("payer")
+            amount = txn.get("amount", 0)
+            split_between = txn.get("split_between", [])
+            include_payer = txn.get("include_payer", False)
+
+            if split_between:
+                if include_payer:
+                    share = amount / (len(split_between) + 1)
+                    for person in split_between:
+                        transactions.append((person, payer, share))
+                else:
+                    share = amount / len(split_between)
+                    for person in split_between:
+                        transactions.append((person, payer, share))
+
+        settlements = minimize_cash_flow(participants, transactions)
+        settlements = [
+            {"from": s[0], "to": s[1], "amount": round(s[2], 2)}
+            for s in settlements
+        ]
 
         broadcast(group, {
             "type": "settlement",
@@ -282,6 +347,9 @@ def handle_client(conn, addr):
 
                 elif action == "list_groups":
                     res = handle_list_groups(user)
+
+                elif action == "get_group_members":
+                    res = handle_get_group_members(req, user)
 
                 elif action == "add_transaction":
                     res = handle_add_transaction(req, user)

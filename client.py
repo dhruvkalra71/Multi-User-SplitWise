@@ -4,7 +4,7 @@ import json
 from queue import Queue
 
 HOST = "127.0.0.1"
-PORT = 5000
+PORT = 5005
 
 response_queue = Queue()
 
@@ -119,6 +119,7 @@ def main_menu(sock, user):
         print("1. View Groups")
         print("2. Create Group")
         print("3. Join Group")
+        print("4. Open Group")
         print("0. Logout")
 
         choice = input("Enter choice: ")
@@ -132,9 +133,11 @@ def main_menu(sock, user):
             if name == "0":
                 continue
 
+            password = input("Set group password (leave empty for no password): ")
+
             send(sock, {
                 "action": "create_group",
-                "data": {"group": name}
+                "data": {"group": name, "password": password}
             })
             print_response(receive())
 
@@ -143,16 +146,38 @@ def main_menu(sock, user):
             if name == "0":
                 continue
 
+            password = input("Enter group password (or leave empty): ")
+
             send(sock, {
                 "action": "join_group",
-                "data": {"group": name}
+                "data": {"group": name, "password": password}
             })
+            print_response(receive())
 
+        elif choice == "4":
+            send(sock, {"action": "list_groups"})
             res = receive()
-            print_response(res)
 
-            if res and res.get("status") == "ok":
-                group_menu(sock, user, name)
+            if not res or not res.get("groups"):
+                print("No groups found. Create or join one first.")
+                continue
+
+            print("\n📂 Your Groups:")
+            for i, g in enumerate(res["groups"]):
+                print(f"{i+1}. {g}")
+
+            sel = input("\nEnter number to open (or 0 to cancel): ")
+            if sel == "0":
+                continue
+
+            try:
+                idx = int(sel) - 1
+                if idx < 0 or idx >= len(res["groups"]):
+                    print("❌ Invalid selection")
+                    continue
+                group_menu(sock, user, res["groups"][idx])
+            except:
+                print("❌ Invalid input")
 
         elif choice == "0":
             print("👋 Logged out")
@@ -169,7 +194,7 @@ def group_menu(sock, user, group):
         print("1. Add Transaction")
         print("2. View Transactions")
         print("3. Delete Transaction")
-        print("4. View Balances")   # 🔥 NEW
+        print("4. View Balances")
         print("5. Settle Transactions")
         print("0. Back")
 
@@ -187,22 +212,42 @@ def group_menu(sock, user, group):
                 print("❌ Invalid amount")
                 continue
 
-            users = input("Split between (excluding yourself): ")
+            send(sock, {
+                "action": "get_group_members",
+                "data": {"group": group}
+            })
+
+            res = receive()
+            if res and res.get("status") == "ok" and res.get("members"):
+                members = [m for m in res["members"] if m != user]
+                print(f"\n👥 Group members (excluding you): {', '.join(members)}")
+            else:
+                members = []
+                print("\n⚠️ Could not fetch members")
+
+            users = input("Split between (comma-separated names, or 0 to cancel): ")
             if users == "0":
                 continue
 
             users = [u.strip() for u in users.split(",") if u.strip()]
 
-            # Remove payer if entered
             if user in users:
                 users.remove(user)
+
+            if not users:
+                print("❌ Must specify at least one person to split with")
+                continue
+
+            include_self = input("Include yourself in split? (y/n): ").strip().lower()
+            include_self = include_self == "y"
 
             send(sock, {
                 "action": "add_transaction",
                 "data": {
                     "group": group,
                     "amount": amount,
-                    "split_between": users
+                    "split_between": users,
+                    "include_payer": include_self
                 }
             })
 
@@ -223,25 +268,52 @@ def group_menu(sock, user, group):
                     payer = txn["payer"]
                     amt = txn["amount"]
                     people = txn["split_between"]
-
-                    print(f"{i}: {payer} paid ₹{amt} for {', '.join(people)}")
+                    include_payer = txn.get("include_payer", False)
+                    payer_note = " (you included)" if include_payer else ""
+                    print(f"{i+1}: {payer} paid ₹{amt} for {', '.join(people)}{payer_note}")
             else:
                 print("No transactions found")
 
         # ---------------- DELETE ---------------- #
         elif choice == "3":
-            idx = input("Enter index (or 0 to cancel): ")
+            send(sock, {
+                "action": "view_transactions",
+                "data": {"group": group}
+            })
+
+            res = receive()
+
+            if not res or not res.get("transactions"):
+                print("No transactions to delete")
+                continue
+
+            print("\n📜 Select transaction to delete:")
+            for i, txn in enumerate(res["transactions"]):
+                payer = txn["payer"]
+                amt = txn["amount"]
+                people = txn["split_between"]
+                include_payer = txn.get("include_payer", False)
+                payer_note = " (you included)" if include_payer else ""
+                print(f"{i+1}: {payer} paid ₹{amt} for {', '.join(people)}{payer_note}")
+
+            idx = input("\nEnter number (or 0 to cancel): ")
             if idx == "0":
                 continue
 
             try:
-                send(sock, {
-                    "action": "delete_transaction",
-                    "data": {"group": group, "index": int(idx)}
-                })
-                print_response(receive())
+                idx = int(idx)
+                if idx < 0 or idx >= len(res["transactions"]):
+                    print("❌ Invalid selection")
+                    continue
             except:
-                print("❌ Invalid index")
+                print("❌ Invalid input")
+                continue
+
+            send(sock, {
+                "action": "delete_transaction",
+                "data": {"group": group, "index": idx}
+            })
+            print_response(receive())
 
         # ---------------- VIEW BALANCES ---------------- #
         elif choice == "4":

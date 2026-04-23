@@ -1,34 +1,44 @@
-def minimize_cash_flow(net_balance):
+def minimize_cash_flow(participants: list[str], transactions: list[tuple[str, str, int]]) -> list[tuple[str, str, int]]:
+    """
+    participants : list of participant names
+    transactions : list of (debtor, payee, amount)
+    returns      : list of (payer, receiver, amount) for minimum cash flow
+    """
+    n = len(participants)
+    index_of = {p: i for i, p in enumerate(participants)}
 
-    # Make a copy so original data is not modified
-    balances = net_balance.copy()
-    settlements = []
+    graph = [[0] * n for _ in range(n)]
+    for debtor, payee, amount in transactions:
+        graph[index_of[debtor]][index_of[payee]] += amount
 
-    # Continue until all balances are zero
-    while True:
-        # Find max creditor and debtor
-        max_creditor = max(balances, key=balances.get)
-        max_debtor = min(balances, key=balances.get)
+    net = [0] * n
+    for i in range(n):
+        for j in range(n):
+            net[i] += graph[j][i]
+            net[i] -= graph[i][j]
 
-        # If all settled
-        if abs(balances[max_creditor]) < 1e-6 and abs(balances[max_debtor]) < 1e-6:
-            break
+    def get_min_idx():
+        return min(range(n), key=lambda i: net[i] if net[i] != 0 else float('inf'))
 
-        # Amount to settle
-        amount = min(
-            balances[max_creditor],
-            -balances[max_debtor]
-        )
+    def get_max_idx():
+        return max(range(n), key=lambda i: net[i] if net[i] != 0 else float('-inf'))
 
-        # Update balances
-        balances[max_creditor] -= amount
-        balances[max_debtor] += amount
+    result = []
+    zeros = sum(1 for x in net if x == 0)
 
-        # Store transaction
-        settlements.append({
-            "from": max_debtor,
-            "to": max_creditor,
-            "amount": round(amount, 2)
-        })
+    while zeros != n:
+        min_i = get_min_idx()
+        max_i = get_max_idx()
 
-    return settlements
+        amount = min(abs(net[min_i]), net[max_i])
+        result.append((participants[min_i], participants[max_i], amount))
+
+        net[min_i] += amount
+        net[max_i] -= amount
+
+        if net[min_i] == 0:
+            zeros += 1
+        if net[max_i] == 0:
+            zeros += 1
+
+    return result

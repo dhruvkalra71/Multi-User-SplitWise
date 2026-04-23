@@ -1,3 +1,29 @@
 {
-    "groups": {}
+    "groups": {
+        "HackWithInfy": {
+            "members": [
+                "dhruv",
+                "abhisht",
+                "yashi"
+            ],
+            "password": "1234",
+            "transactions": [
+                {
+                    "payer": "abhisht",
+                    "amount": 519.0,
+                    "split_between": [
+                        "dhruv",
+                        "yashi"
+                    ]
+                },
+                {
+                    "payer": "abhisht",
+                    "amount": 98.0,
+                    "split_between": [
+                        "dhruv"
+                    ]
+                }
+            ]
+        }
+    }
 }

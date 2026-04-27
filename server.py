@@ -140,6 +140,7 @@ def handle_get_group_members(req, user):
 def handle_add_transaction(req, user):
     group_name = req["data"]["group"]
     amount = req["data"]["amount"]
+    description = req["data"].get("description", "")
     split_between = req["data"]["split_between"]
     include_payer = req["data"].get("include_payer", False)
 
@@ -160,6 +161,7 @@ def handle_add_transaction(req, user):
     txn = {
         "payer": user,
         "amount": amount,
+        "description": description,
         "split_between": split_between,
         "include_payer": include_payer
     }
@@ -169,11 +171,6 @@ def handle_add_transaction(req, user):
             group["transactions"] = []
         group["transactions"].append(txn)
         save_data(data_store)
-
-    broadcast(group, {
-        "type": "notification",
-        "message": f"{user} added ₹{amount} expense"
-    })
 
     return {"status": "ok", "message": "Transaction added"}
 
@@ -296,11 +293,6 @@ def handle_settle(req):
             {"from": s[0], "to": s[1], "amount": round(s[2], 2)}
             for s in settlements
         ]
-
-        broadcast(group, {
-            "type": "settlement",
-            "data": settlements
-        })
 
         return {"status": "ok", "settlements": settlements}
 

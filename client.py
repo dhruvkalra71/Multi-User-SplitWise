@@ -212,6 +212,8 @@ def group_menu(sock, user, group):
                 print("❌ Invalid amount")
                 continue
 
+            description = input("Description: ")
+
             send(sock, {
                 "action": "get_group_members",
                 "data": {"group": group}
@@ -246,6 +248,7 @@ def group_menu(sock, user, group):
                 "data": {
                     "group": group,
                     "amount": amount,
+                    "description": description,
                     "split_between": users,
                     "include_payer": include_self
                 }
@@ -267,10 +270,12 @@ def group_menu(sock, user, group):
                 for i, txn in enumerate(res["transactions"]):
                     payer = txn["payer"]
                     amt = txn["amount"]
+                    desc = txn.get("description", "")
                     people = txn["split_between"]
                     include_payer = txn.get("include_payer", False)
                     payer_note = " (you included)" if include_payer else ""
-                    print(f"{i+1}: {payer} paid ₹{amt} for {', '.join(people)}{payer_note}")
+                    desc_note = f" - {desc}" if desc else ""
+                    print(f"{i+1}: {payer} paid ₹{amt} for {', '.join(people)}{payer_note}{desc_note}")
             else:
                 print("No transactions found")
 
@@ -291,10 +296,12 @@ def group_menu(sock, user, group):
             for i, txn in enumerate(res["transactions"]):
                 payer = txn["payer"]
                 amt = txn["amount"]
+                desc = txn.get("description", "")
                 people = txn["split_between"]
                 include_payer = txn.get("include_payer", False)
                 payer_note = " (you included)" if include_payer else ""
-                print(f"{i+1}: {payer} paid ₹{amt} for {', '.join(people)}{payer_note}")
+                desc_note = f" - {desc}" if desc else ""
+                print(f"{i+1}: {payer} paid ₹{amt} for {', '.join(people)}{payer_note}{desc_note}")
 
             idx = input("\nEnter number (or 0 to cancel): ")
             if idx == "0":

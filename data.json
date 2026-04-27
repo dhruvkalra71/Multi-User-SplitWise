@@ -1,29 +1,40 @@
 {
     "groups": {
-        "HackWithInfy": {
+        "Goa": {
             "members": [
                 "dhruv",
                 "abhisht",
                 "yashi"
             ],
-            "password": "1234",
             "transactions": [
                 {
-                    "payer": "abhisht",
-                    "amount": 519.0,
+                    "payer": "dhruv",
+                    "amount": 100.0,
                     "split_between": [
-                        "dhruv",
+                        "abhisht",
                         "yashi"
-                    ]
+                    ],
+                    "include_payer": true
+                },
+                {
+                    "payer": "dhruv",
+                    "amount": 50.0,
+                    "split_between": [
+                        "abhisht",
+                        "yashi"
+                    ],
+                    "include_payer": false
                 },
                 {
                     "payer": "abhisht",
-                    "amount": 98.0,
+                    "amount": 120.0,
                     "split_between": [
                         "dhruv"
-                    ]
+                    ],
+                    "include_payer": true
                 }
-            ]
+            ],
+            "password": "1234"
         }
     }
 }

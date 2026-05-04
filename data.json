@@ -32,6 +32,15 @@
                         "dhruv"
                     ],
                     "include_payer": true
+                },
+                {
+                    "payer": "dhruv",
+                    "amount": 75,
+                    "description": "IceCream",
+                    "split_between": [
+                        "abhisht"
+                    ],
+                    "include_payer": true
                 }
             ],
             "password": "1234"

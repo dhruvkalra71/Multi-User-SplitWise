@@ -7,19 +7,29 @@ from settlement import minimize_cash_flow
 HOST = "0.0.0.0"
 PORT = 5005
 
-# ------------------ File Path ------------------ #
+# ------------------ File Paths ------------------ #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data.json")
+USERS_FILE = os.path.join(BASE_DIR, "users.json")
 
 # ------------------ Users ------------------ #
-# Hardcoded users
-USERS = {
-    "dhruv": "1234",
-    "abhisht": "xyz",
-    "raghav": "panda123",
-    "yashi": "23103038"
-}
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        return {}
+    try:
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
+def save_users(users):
+    try:
+        with open(USERS_FILE, "w") as f:
+            json.dump(users, f, indent=4)
+    except Exception as e:
+        print("[USERS SAVE ERROR]:", e)
+
+USERS = load_users()
 active_clients = {}
 lock = threading.Lock()
 
@@ -62,9 +72,28 @@ def broadcast(group, message):
 
 # ------------------ Core Logic ------------------ #
 
+def handle_signup(conn, req):
+    username = req["data"]["username"]
+    password = req["data"]["password"]
+
+    global USERS
+    USERS = load_users()
+
+    if username in USERS:
+        return {"status": "error", "message": "Username already exists"}
+
+    USERS[username] = password
+    save_users(USERS)
+
+    return {"status": "ok", "message": "Signup successful"}
+
+
 def handle_login(conn, req):
     username = req["data"]["username"]
     password = req["data"]["password"]
+
+    global USERS
+    USERS = load_users()
 
     if username in USERS and USERS[username] == password:
         active_clients[username] = conn
@@ -326,7 +355,10 @@ def handle_client(conn, addr):
 
                 action = req.get("action")
 
-                if action == "login":
+                if action == "signup":
+                    res = handle_signup(conn, req)
+
+                elif action == "login":
                     res = handle_login(conn, req)
                     if res["status"] == "ok":
                         user = req["data"]["username"]

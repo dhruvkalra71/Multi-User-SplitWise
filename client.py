@@ -91,6 +91,36 @@ def print_balances(balances):
         print("All settled ✅")
 
 
+# ------------------ Signup ------------------ #
+def signup(sock):
+    while True:
+        print("\n--- SIGNUP ---")
+        username = input("Choose username: ")
+        if not username:
+            print("❌ Username cannot be empty")
+            continue
+
+        password = input("Choose password: ")
+        confirm = input("Confirm password: ")
+
+        if password != confirm:
+            print("❌ Passwords do not match")
+            continue
+
+        send(sock, {
+            "action": "signup",
+            "data": {"username": username, "password": password}
+        })
+
+        res = receive()
+
+        if res and res.get("status") == "ok":
+            print("✅ Signup successful")
+            return username
+        else:
+            print(f"❌ {res.get('message', 'Signup failed')}")
+
+
 # ------------------ Login ------------------ #
 def login(sock):
     while True:
@@ -369,8 +399,28 @@ def start_client():
     thread = threading.Thread(target=listen_server, args=(sock,), daemon=True)
     thread.start()
 
-    user = login(sock)
-    main_menu(sock, user)
+    while True:
+        print("\n--- WELCOME ---")
+        print("1. Login")
+        print("2. Signup")
+        print("0. Exit")
+
+        choice = input("Enter choice: ")
+
+        if choice == "1":
+            user = login(sock)
+            main_menu(sock, user)
+            break
+        elif choice == "2":
+            user = signup(sock)
+            main_menu(sock, user)
+            break
+        elif choice == "0":
+            print("👋 Goodbye")
+            sock.close()
+            return
+        else:
+            print("Invalid choice")
 
     sock.close()
     print("Disconnected")

@@ -11,10 +11,10 @@ SplitWise is a client-server application that allows multiple users to manage sh
 ### Server (`server.py`)
 - Multi-threaded TCP server using Python sockets
 - Handles concurrent client connections
-- Manages user authentication with hardcoded credentials
+- Manages user authentication with local signup/login (`users.json`)
 - Stores group data and transactions in `data.json`
 - Supports the following operations:
-  - User login/logout
+  - User signup and login/logout
   - Create and join password-protected groups
   - Add, view, and delete transactions
   - View real-time balances
@@ -33,6 +33,7 @@ SplitWise is a client-server application that allows multiple users to manage sh
 
 ## Features
 
+- **User Authentication**: Sign up and login with credentials stored locally
 - **Multi-user Support**: Multiple users can connect simultaneously
 - **Group Management**: Create and join groups with optional password protection
 - **Flexible Splitting**: Split expenses with or without including the payer
@@ -66,20 +67,20 @@ The server will start on `0.0.0.0:5005`.
 python client.py
 ```
 
-The client will connect to `127.0.0.1:5005`.
-
-### Default Users
-
-| Username | Password |
-|----------|----------|
-| dhruv    | 1234     |
-| abhisht  | xyz      |
-| raghav   | panda123 |
-| yashi    | 23103038 |
+The client will connect to `127.0.0.1:5005` and prompt you to signup or login.
 
 ## Data Structure
 
-All data is stored in `data.json` with the following structure:
+User credentials are stored in `users.json`:
+
+```json
+{
+  "username1": "password1",
+  "username2": "password2"
+}
+```
+
+Group data is stored in `data.json`:
 
 ```json
 {
@@ -114,6 +115,7 @@ Client-server communication uses JSON messages over TCP with newline delimiters:
 ```
 
 **Supported Actions:**
+- `signup` - Create a new user account
 - `login` - Authenticate user
 - `create_group` - Create a new group
 - `join_group` - Join an existing group
@@ -132,7 +134,8 @@ Multi-User-SplitWise/
 ├── server.py          # Multi-threaded TCP server
 ├── client.py          # CLI client application
 ├── settlement.py      # Minimum cash flow algorithm
-├── data.json          # Persistent data storage
+├── data.json          # Group and transaction storage (local)
+├── users.json         # User credentials storage (local)
 └── webapp/            # Web application (excluded from repo)
 ```
 

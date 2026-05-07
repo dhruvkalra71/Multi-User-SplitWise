@@ -1,4 +1,4 @@
-def minimize_cash_flow(participants: list[str], transactions: list[tuple[str, str, int]]) -> list[tuple[str, str, int]]:
+def minimize_cash_flow(participants: list[str], transactions: list[tuple[str, str, float]]) -> list[tuple[str, str, float]]:
     """
     participants : list of participant names
     transactions : list of (debtor, payee, amount)

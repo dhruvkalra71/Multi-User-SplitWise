@@ -338,7 +338,7 @@ def group_menu(sock, user, group):
                 continue
 
             try:
-                idx = int(idx)
+                idx = int(idx) - 1
                 if idx < 0 or idx >= len(res["transactions"]):
                     print("❌ Invalid selection")
                     continue
@@ -412,9 +412,8 @@ def start_client():
             main_menu(sock, user)
             break
         elif choice == "2":
-            user = signup(sock)
-            main_menu(sock, user)
-            break
+            signup(sock)
+            continue
         elif choice == "0":
             print("👋 Goodbye")
             sock.close()

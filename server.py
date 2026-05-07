@@ -64,12 +64,6 @@ def send(conn, msg):
         pass
 
 
-def broadcast(group, message):
-    for user in group["members"]:
-        if user in active_clients:
-            send(active_clients[user], message)
-
-
 # ------------------ Core Logic ------------------ #
 
 def handle_signup(conn, req):
@@ -179,9 +173,8 @@ def handle_add_transaction(req, user):
     group = data_store["groups"][group_name]
     members = group.get("members", [])
 
-    all_people = split_between[:]
-    if include_payer:
-        all_people.append(user)
+    if user not in members:
+        return {"status": "error", "message": "Not a member of this group"}
 
     for u in split_between:
         if u not in members:
@@ -204,26 +197,27 @@ def handle_add_transaction(req, user):
     return {"status": "ok", "message": "Transaction added"}
 
 
-def handle_view_transactions(req):
+def handle_view_transactions(req, user):
     group_name = req["data"]["group"]
 
-    if group_name not in data_store["groups"]:
-        return {"status": "error", "message": "Group not found"}
+    group, err = require_member(group_name, user)
+    if err:
+        return {"status": "error", "message": err}
 
     return {
         "status": "ok",
-        "transactions": data_store["groups"][group_name].get("transactions", [])
+        "transactions": group.get("transactions", [])
     }
 
 
-def handle_delete_transaction(req):
+def handle_delete_transaction(req, user):
     group_name = req["data"]["group"]
     index = req["data"]["index"]
 
-    if group_name not in data_store["groups"]:
-        return {"status": "error", "message": "Group not found"}
+    group, err = require_member(group_name, user)
+    if err:
+        return {"status": "error", "message": err}
 
-    group = data_store["groups"][group_name]
     transactions = group.get("transactions", [])
 
     with lock:
@@ -234,6 +228,18 @@ def handle_delete_transaction(req):
             return {"status": "ok", "message": "Transaction deleted"}
         except:
             return {"status": "error", "message": "Invalid index"}
+
+
+# ------------------ Authorization ------------------ #
+
+def require_member(group_name, user):
+    group = data_store["groups"].get(group_name)
+    if not group:
+        return None, "Group not found"
+    members = group.get("members", [])
+    if user not in members:
+        return None, "Not a member of this group"
+    return group, None
 
 
 # ------------------ Balance Logic ------------------ #
@@ -269,15 +275,14 @@ def compute_balances(group):
     return balances
 
 
-def handle_view_balances(req):
+def handle_view_balances(req, user):
     group_name = req["data"]["group"]
 
-    if group_name not in data_store["groups"]:
-        return {"status": "error", "message": "Group not found"}
+    group, err = require_member(group_name, user)
+    if err:
+        return {"status": "error", "message": err}
 
-    group = data_store["groups"][group_name]
     balances = compute_balances(group)
-
     balances = {k: round(v, 2) for k, v in balances.items()}
 
     return {"status": "ok", "balances": balances}
@@ -285,14 +290,14 @@ def handle_view_balances(req):
 
 # ------------------ Settlement ------------------ #
 
-def handle_settle(req):
+def handle_settle(req, user):
     try:
         group_name = req["data"]["group"]
 
-        if group_name not in data_store["groups"]:
-            return {"status": "error", "message": "Group not found"}
+        group, err = require_member(group_name, user)
+        if err:
+            return {"status": "error", "message": err}
 
-        group = data_store["groups"][group_name]
         members = group.get("members", [])
         transactions_list = group.get("transactions", [])
 
@@ -355,43 +360,50 @@ def handle_client(conn, addr):
 
                 action = req.get("action")
 
-                if action == "signup":
-                    res = handle_signup(conn, req)
+                try:
+                    if action == "signup":
+                        res = handle_signup(conn, req)
 
-                elif action == "login":
-                    res = handle_login(conn, req)
-                    if res["status"] == "ok":
-                        user = req["data"]["username"]
+                    elif action == "login":
+                        res = handle_login(conn, req)
+                        if res["status"] == "ok":
+                            user = req["data"]["username"]
 
-                elif action == "create_group":
-                    res = handle_create_group(req, user)
+                    elif not user:
+                        res = {"status": "error", "message": "Not authenticated"}
 
-                elif action == "join_group":
-                    res = handle_join_group(req, user)
+                    elif action == "create_group":
+                        res = handle_create_group(req, user)
 
-                elif action == "list_groups":
-                    res = handle_list_groups(user)
+                    elif action == "join_group":
+                        res = handle_join_group(req, user)
 
-                elif action == "get_group_members":
-                    res = handle_get_group_members(req, user)
+                    elif action == "list_groups":
+                        res = handle_list_groups(user)
 
-                elif action == "add_transaction":
-                    res = handle_add_transaction(req, user)
+                    elif action == "get_group_members":
+                        res = handle_get_group_members(req, user)
 
-                elif action == "view_transactions":
-                    res = handle_view_transactions(req)
+                    elif action == "add_transaction":
+                        res = handle_add_transaction(req, user)
 
-                elif action == "delete_transaction":
-                    res = handle_delete_transaction(req)
+                    elif action == "view_transactions":
+                        res = handle_view_transactions(req, user)
 
-                elif action == "view_balances":
-                    res = handle_view_balances(req)
+                    elif action == "delete_transaction":
+                        res = handle_delete_transaction(req, user)
 
-                elif action == "settle":
-                    res = handle_settle(req)
+                    elif action == "view_balances":
+                        res = handle_view_balances(req, user)
 
-                else:
-                    res = {"status": "error", "message": "Unknown action"}
+                    elif action == "settle":
+                        res = handle_settle(req, user)
+
+                    else:
+                        res = {"status": "error", "message": "Unknown action"}
+                except Exception as e:
+                    print("[HANDLER ERROR]", e)
+                    res = {"status": "error", "message": "Internal server error"}
 
                 send(conn, res)
 

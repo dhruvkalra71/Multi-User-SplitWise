@@ -8,6 +8,57 @@ SplitWise is a client-server application that allows multiple users to manage sh
 
 ## Architecture
 
+```mermaid
+sequenceDiagram
+    participant Client as CLI Client
+    participant Server as TCP Server
+    participant Store as JSON Store
+
+    Note over Client,Store: Authentication
+    Client->>Server: signup(username, password)
+    Server->>Store: save users.json
+    Server-->>Client: ok / error
+
+    Client->>Server: login(username, password)
+    Server->>Store: read users.json
+    Server-->>Client: ok / error
+
+    Note over Client,Store: Group Management
+    Client->>Server: create_group(name, password)
+    Server->>Store: save data.json
+    Server-->>Client: ok / error
+
+    Client->>Server: join_group(name, password)
+    Server->>Store: update data.json
+    Server-->>Client: ok / error
+
+    Client->>Server: list_groups
+    Server->>Store: read data.json
+    Server-->>Client: groups list
+
+    Note over Client,Store: Transactions
+    Client->>Server: add_transaction(payer, amount, split, include_payer)
+    Server->>Store: save data.json
+    Server-->>Client: ok / error
+
+    Client->>Server: view_transactions(group)
+    Server->>Store: read data.json
+    Server-->>Client: transactions list
+
+    Client->>Server: delete_transaction(group, index)
+    Server->>Store: save data.json
+    Server-->>Client: ok / error
+
+    Note over Client,Store: Balances & Settlement
+    Client->>Server: view_balances(group)
+    Server->>Server: compute_balances()
+    Server-->>Client: per-person balances
+
+    Client->>Server: settle(group)
+    Server->>Server: minimize_cash_flow()
+    Server-->>Client: optimized payment plan
+```
+
 ### Server (`server.py`)
 - Multi-threaded TCP server using Python sockets
 - Handles concurrent client connections
@@ -136,7 +187,7 @@ Multi-User-SplitWise/
 ├── settlement.py      # Minimum cash flow algorithm
 ├── data.json          # Group and transaction storage (local)
 ├── users.json         # User credentials storage (local)
-└── webapp/            # Web application (excluded from repo)
+└── Control-Flow-Diagram.png  # Architecture diagram (removed)
 ```
 
 ## License

@@ -1,5 +1,13 @@
-# Web application
-webapp/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.externalNativeBuild/
+*.apk
+*.aab
+*.ap_
 
 # Python
 __pycache__/
